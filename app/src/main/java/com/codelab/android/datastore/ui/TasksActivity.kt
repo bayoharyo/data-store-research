@@ -16,21 +16,45 @@
 
 package com.codelab.android.datastore.ui
 
+import android.content.Context
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import androidx.datastore.preferences.SharedPreferencesMigration
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.DividerItemDecoration
 import com.codelab.android.datastore.data.SortOrder
 import com.codelab.android.datastore.data.TasksRepository
+import com.codelab.android.datastore.data.UserPreferences
 import com.codelab.android.datastore.data.UserPreferencesRepository
 import com.codelab.android.datastore.databinding.ActivityTasksBinding
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+import java.io.IOException
 
 class TasksActivity : AppCompatActivity() {
+
+    companion object {
+
+        private const val USER_PREFERENCES_NAME = "user_preferences"
+    }
 
     private lateinit var binding: ActivityTasksBinding
     private val adapter = TasksAdapter()
 
     private lateinit var viewModel: TasksViewModel
+
+    private val Context.dataStore by preferencesDataStore(
+        name = USER_PREFERENCES_NAME,
+        produceMigrations = { context ->
+            listOf(
+                SharedPreferencesMigration(context, USER_PREFERENCES_NAME)
+            )
+        }
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,7 +64,10 @@ class TasksActivity : AppCompatActivity() {
 
         viewModel = ViewModelProvider(
             this,
-            TasksViewModelFactory(TasksRepository, UserPreferencesRepository.getInstance(this))
+            TasksViewModelFactory(
+                TasksRepository,
+                UserPreferencesRepository(dataStore, this)
+            )
         )[TasksViewModel::class.java]
 
         setupRecyclerView()
