@@ -19,24 +19,18 @@ package com.codelab.android.datastore.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
+import com.codelab.android.datastore.UserPreferences
+import com.codelab.android.datastore.UserPreferences.SortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-enum class SortOrder {
-    NONE,
-    BY_DEADLINE,
-    BY_PRIORITY,
-    BY_DEADLINE_AND_PRIORITY
-}
-
 /**
  * Class that handles saving and retrieving user preferences
  */
 class UserPreferencesRepository constructor(
-    private val dataStore: DataStore<Preferences>,
-    context: Context
+    private val dataStore: DataStore<UserPreferences>
 ) {
 
     private object PreferencesKeys {
@@ -47,24 +41,17 @@ class UserPreferencesRepository constructor(
     val userPreferencesFlow: Flow<UserPreferences> = dataStore.data
         .catch {  exception ->
             if (exception is IOException) {
-                emit(emptyPreferences())
+                emit(UserPreferences.getDefaultInstance())
             } else {
                 throw exception
             }
         }
-        .map { preferences ->
-            val completed = preferences[PreferencesKeys.SHOW_COMPLETED] ?: false
-            val sortOrder = SortOrder.valueOf(
-                preferences[PreferencesKeys.SORT_ORDER] ?: SortOrder.NONE.name
-            )
-            UserPreferences(completed, sortOrder)
-        }
 
     suspend fun enableSortByDeadline(enable: Boolean) {
-        dataStore.edit {  preferences ->
-            val currentOrder = SortOrder.valueOf(
-                preferences[PreferencesKeys.SORT_ORDER] ?: SortOrder.NONE.name
-            )
+        // updateData handles data transactionally, ensuring that if the sort is updated at the same
+        // time from another thread, we won't have conflicts
+        dataStore.updateData { preferences ->
+            val currentOrder = preferences.sortOrder
             val newSortOrder =
                 if (enable) {
                     if (currentOrder == SortOrder.BY_PRIORITY) {
@@ -79,16 +66,13 @@ class UserPreferencesRepository constructor(
                         SortOrder.NONE
                     }
                 }
-
-            preferences[PreferencesKeys.SORT_ORDER] = newSortOrder.name
+            preferences.toBuilder().setSortOrder(newSortOrder).build()
         }
     }
 
     suspend fun enableSortByPriority(enable: Boolean) {
-        dataStore.edit { preferences ->
-            val currentOrder = SortOrder.valueOf(
-                preferences[PreferencesKeys.SORT_ORDER] ?: SortOrder.NONE.name
-            )
+        dataStore.updateData { preferences ->
+            val currentOrder = preferences.sortOrder
             val newSortOrder =
                 if (enable) {
                     if (currentOrder == SortOrder.BY_DEADLINE) {
@@ -103,13 +87,16 @@ class UserPreferencesRepository constructor(
                         SortOrder.NONE
                     }
                 }
-            preferences[PreferencesKeys.SORT_ORDER] = newSortOrder.name
+            preferences.toBuilder().setSortOrder(newSortOrder).build()
         }
     }
 
     suspend fun updateShowCompleted(showCompleted: Boolean) {
-        dataStore.edit {  preferences ->
-            preferences[PreferencesKeys.SHOW_COMPLETED] = showCompleted
+        dataStore.updateData {  preferences ->
+            preferences
+                .toBuilder()
+                .setShowCompleted(showCompleted)
+                .build()
         }
     }
 }

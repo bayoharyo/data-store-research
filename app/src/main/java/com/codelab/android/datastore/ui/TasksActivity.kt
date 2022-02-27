@@ -19,42 +19,54 @@ package com.codelab.android.datastore.ui
 import android.content.Context
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
-import androidx.datastore.preferences.SharedPreferencesMigration
-import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.datastore.core.DataStore
+import androidx.datastore.dataStore
+import androidx.datastore.migrations.SharedPreferencesMigration
+import androidx.datastore.migrations.SharedPreferencesView
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.DividerItemDecoration
-import com.codelab.android.datastore.data.SortOrder
+import com.codelab.android.datastore.UserPreferences
+import com.codelab.android.datastore.UserPreferences.SortOrder
 import com.codelab.android.datastore.data.TasksRepository
-import com.codelab.android.datastore.data.UserPreferences
 import com.codelab.android.datastore.data.UserPreferencesRepository
+import com.codelab.android.datastore.data.UserPreferencesSerializer
 import com.codelab.android.datastore.databinding.ActivityTasksBinding
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.map
-import java.io.IOException
+
+private const val USER_PREFERENCES_NAME = "user_preferences"
+private const val DATA_STORE_FILE_NAME = "user_prefs.pb"
+private const val SORT_ORDER_KEY = "sort_order"
+
+// Build the DataStore
+private val Context.userPreferencesStore: DataStore<UserPreferences> by dataStore(
+    fileName = DATA_STORE_FILE_NAME,
+    serializer = UserPreferencesSerializer(),
+    produceMigrations = { context ->
+        listOf(
+            SharedPreferencesMigration(
+                context,
+                USER_PREFERENCES_NAME
+            ) { sharedPrefs: SharedPreferencesView, currentData: UserPreferences ->
+                // Define the mapping from SharedPreferences to UserPreferences
+                if (currentData.sortOrder == SortOrder.UNSPECIFIED) {
+                    currentData.toBuilder().setSortOrder(
+                        SortOrder.valueOf(
+                            sharedPrefs.getString(SORT_ORDER_KEY, SortOrder.NONE.name)!!
+                        )
+                    ).build()
+                } else {
+                    currentData
+                }
+            }
+        )
+    }
+)
 
 class TasksActivity : AppCompatActivity() {
-
-    companion object {
-
-        private const val USER_PREFERENCES_NAME = "user_preferences"
-    }
 
     private lateinit var binding: ActivityTasksBinding
     private val adapter = TasksAdapter()
 
     private lateinit var viewModel: TasksViewModel
-
-    private val Context.dataStore by preferencesDataStore(
-        name = USER_PREFERENCES_NAME,
-        produceMigrations = { context ->
-            listOf(
-                SharedPreferencesMigration(context, USER_PREFERENCES_NAME)
-            )
-        }
-    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -66,24 +78,15 @@ class TasksActivity : AppCompatActivity() {
             this,
             TasksViewModelFactory(
                 TasksRepository,
-                UserPreferencesRepository(dataStore, this)
+                UserPreferencesRepository(userPreferencesStore)
             )
-        )[TasksViewModel::class.java]
+        ).get(TasksViewModel::class.java)
 
         setupRecyclerView()
-        setupFilterListeners(viewModel)
-        setupSort()
 
         viewModel.tasksUiModel.observe(this) { tasksUiModel ->
             adapter.submitList(tasksUiModel.tasks)
-            updateSort(tasksUiModel.sortOrder)
-            binding.showCompletedSwitch.isChecked = tasksUiModel.showCompleted
-        }
-    }
-
-    private fun setupFilterListeners(viewModel: TasksViewModel) {
-        binding.showCompletedSwitch.setOnCheckedChangeListener { _, checked ->
-            viewModel.showCompletedTasks(checked)
+            updateTaskFilters(tasksUiModel.sortOrder, tasksUiModel.showCompleted)
         }
     }
 
@@ -95,19 +98,25 @@ class TasksActivity : AppCompatActivity() {
         binding.list.adapter = adapter
     }
 
-    private fun setupSort() {
+    private fun setupOnCheckedChangeListeners() {
         binding.sortDeadline.setOnCheckedChangeListener { _, checked ->
             viewModel.enableSortByDeadline(checked)
         }
         binding.sortPriority.setOnCheckedChangeListener { _, checked ->
             viewModel.enableSortByPriority(checked)
         }
+        binding.showCompletedSwitch.setOnCheckedChangeListener { _, checked ->
+            viewModel.showCompletedTasks(checked)
+        }
     }
 
-    private fun updateSort(sortOrder: SortOrder) {
-        binding.sortDeadline.isChecked =
-            sortOrder == SortOrder.BY_DEADLINE || sortOrder == SortOrder.BY_DEADLINE_AND_PRIORITY
-        binding.sortPriority.isChecked =
-            sortOrder == SortOrder.BY_PRIORITY || sortOrder == SortOrder.BY_DEADLINE_AND_PRIORITY
+    private fun updateTaskFilters(sortOrder: SortOrder, showCompleted: Boolean) {
+        with(binding) {
+            showCompletedSwitch.isChecked = showCompleted
+            sortDeadline.isChecked =
+                sortOrder == SortOrder.BY_DEADLINE || sortOrder == SortOrder.BY_DEADLINE_AND_PRIORITY
+            sortPriority.isChecked =
+                sortOrder == SortOrder.BY_PRIORITY || sortOrder == SortOrder.BY_DEADLINE_AND_PRIORITY
+        }
     }
 }
